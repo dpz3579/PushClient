@@ -65,7 +65,8 @@ var registerDevice = function(registrationId, tags, cb){
         'language' : Titanium.Platform.locale,
         'device_model' : Titanium.Platform.model,
         'timezone' : tz,
-        'sdk' : Titanium.Platform.version
+        'sdk' : Titanium.Platform.version,
+        'notification_types' : "1" // ensures use opt in to recieves notifications
     };
     
     Ti.API.info('oneSignalRequest:' + JSON.stringify(params));
@@ -162,6 +163,67 @@ var sendMessage = function(message, delay, cb){
     request.send(JSON.stringify(params));
 };
 
+var logout = function(cb){
+    var playerId = Ti.App.Properties.getString('OneSignal.Player.Id', false);
+    if (!playerId) {
+        alert('Please first register your device');
+        return;
+    }
+
+    var client = Ti.Network.createHTTPClient({
+        onload : function(e) {
+            var finalResp = {};
+            // removes all tags user has set 
+            _.each(_.keys(JSON.parse(this.responseText).tags),function(value){
+                finalResp[value] = "";
+            });
+
+            var request = Titanium.Network.createHTTPClient({
+                enableKeepAlive : false,
+                onload : function(e) {
+                    try {
+                        var statusCode = request.status;
+                        var response = JSON.parse(request.responseText);
+                        if (statusCode == 200 || statusCode == 201) {
+                            Ti.App.Properties.setString('OneSignal.Player.Id', null);
+                            cb(false, response);
+                        } else {
+                            cb(true, response);
+                        }
+                    } catch (ex) {
+                        cb(true, response);
+                    }
+                },
+                onerror : function(e) {
+                    Titanium.API.error(JSON.stringify(e));
+                    cb(true, e.error);
+                }
+            });
+         
+            var params = {
+                tags : finalResp,
+                notification_types : "-2" // opt out of sending notifications
+            };
+            
+            Ti.API.info('oneSignalRequest:' + JSON.stringify(params));
+
+            request.open('PUT', Alloy.CFG.OneSignalRESTApiBaseUri + 'players/' + playerId, true);
+            request.setRequestHeader('Authorization', "Basic " + Alloy.CFG.OnesignalRESTApiKey);
+            request.setRequestHeader('Content-Type', 'application/json');
+            request.send(JSON.stringify(params));
+            cb(false, this.responseText);
+        },
+        onerror : function(e) {
+            Ti.API.debug(e.error);
+            cb(true, e.error);
+        },
+        timeout : 5000  // in milliseconds
+    });
+    client.open("GET",  Alloy.CFG.OneSignalRESTApiBaseUri + 'players/'+playerId+'?app_id='+ Alloy.CFG.OneSignalApplicationId);
+    client.send();
+};
+
 exports.registerDevice = registerDevice;
 exports.confirmPushOpened = confirmPushOpened;
 exports.sendMessage = sendMessage;
+exports.logout = logout;
